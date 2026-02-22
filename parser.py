@@ -123,7 +123,10 @@ def parse_time_line(text: str, base_date: datetime) -> Optional[datetime]:
         if meridian == "am" and hour == 12:
             hour = 0
 
-    return base_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    try:
+        return base_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    except:
+        return None
 
 
 # ---------------------------------
