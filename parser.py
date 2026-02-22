@@ -139,7 +139,6 @@ def parse_message(text: str, telegram_datetime: datetime) -> Dict:
     timestamp = None
     events = []
     errors = []
-    current_context = None
 
     # --------- Time Detection ----------
     for line in lines:
@@ -163,48 +162,32 @@ def parse_message(text: str, telegram_datetime: datetime) -> Dict:
             # Time has already been processed earlier
             line_processed = True
 
-        # Breastfeed intent
-        if fuzzy_contains(lower, ["breastfeed", "breast", "nurse"]):
+        # Breastfeeding 
+        if fuzzy_contains(lower, ["left", "right", "each", "both"]) and DURATION_REGEX.search(text):
+            side = fuzzy_extract_keyword(lower, ["left", "right", "each", "both"])
             duration = parse_duration(lower)
-            current_context = "breastfeed"
-
             if duration:
                 events.append({
                     "event_type": "breastfeed",
-                    "side": None,
+                    "side": side,
                     "duration_minutes": duration,
                     "timestamp": timestamp
                 })
                 line_processed = True
             else:
-                errors.append(f"Breastfeed duration missing: {line}")
-
-        # Side-specific breastfeeding
-        if current_context == "breastfeed":
-            side = fuzzy_extract_keyword(lower, ["left", "right"])
-            if side:
-                duration = parse_duration(lower)
-                if duration:
-                    events.append({
-                        "event_type": "breastfeed",
-                        "side": side,
-                        "duration_minutes": duration,
-                        "timestamp": timestamp
-                    })
-                    line_processed = True
-                else:
-                    errors.append(f"Side duration missing: {line}")
+                errors.append(f"Side duration missing: {line}")
 
         # Bottle feeding
-        if fuzzy_contains(lower, ["formula", "bottle", "fed", "milk"]):
+        if fuzzy_contains(lower, ["formula", "bottle", "fed", "milk", "breastmilk"]) and AMOUNT_REGEX.search(lower):
+            feed_type = fuzzy_extract_keyword(lower, ["formula", "bottle", "fed", "milk", "breastmilk"])
             amount = parse_amount(lower)
             if amount:
                 events.append({
                     "event_type": "bottle_feed",
                     "quantity_ml": amount,
-                    "timestamp": timestamp
+                    "timestamp": timestamp,
+                    "feed_type": feed_type
                 })
-                current_context = None
                 line_processed = True
 
         # Diaper wet
@@ -217,7 +200,6 @@ def parse_message(text: str, telegram_datetime: datetime) -> Dict:
                 "timestamp": timestamp
             })
             line_processed = True
-            current_context = None
 
         # Diaper poop
         if fuzzy_contains(lower, ["poop", "potty", "dirty"]):
@@ -229,7 +211,6 @@ def parse_message(text: str, telegram_datetime: datetime) -> Dict:
                 "timestamp": timestamp
             })
             line_processed = True
-            current_context = None
 
         # Sleep
         if fuzzy_contains(lower, ["sleep", "slept", "nap"]):
@@ -243,7 +224,6 @@ def parse_message(text: str, telegram_datetime: datetime) -> Dict:
             else:
                 errors.append(f"Sleep duration missing: {line}")
             line_processed = True
-            current_context = None
 
         if not line_processed:
             errors.append(f"Unrecognized line: {line}")
