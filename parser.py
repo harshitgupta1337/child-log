@@ -1,7 +1,10 @@
 import re
+import logging
 from datetime import datetime
 from typing import List, Dict, Optional
 from rapidfuzz import fuzz
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------
@@ -20,7 +23,9 @@ def fuzzy_contains(text: str, keywords: List[str]) -> bool:
 
     for token in tokens:
         for keyword in keywords:
-            if fuzz.ratio(token, keyword) >= FUZZY_THRESHOLD:
+            score = fuzz.ratio(token, keyword)
+            if score >= FUZZY_THRESHOLD:
+                logger.debug("fuzzy_contains: token=%r matched keyword=%r (score=%d)", token, keyword, score)
                 return True
     return False
 
@@ -39,8 +44,10 @@ def fuzzy_extract_keyword(text: str, keywords: List[str]) -> Optional[str]:
                 best_match = keyword
 
     if best_score >= FUZZY_THRESHOLD:
+        logger.debug("fuzzy_extract_keyword: best_match=%r (score=%d)", best_match, best_score)
         return best_match
 
+    logger.debug("fuzzy_extract_keyword: no match above threshold (best=%r, score=%d)", best_match, best_score)
     return None
 
 
@@ -87,8 +94,10 @@ def parse_duration(text: str) -> Optional[int]:
     if total == 0:
         single = re.search(r'\d+', text)
         if single:
+            logger.debug("parse_duration: fallback single number=%s", single.group())
             return int(single.group())
 
+    logger.debug("parse_duration: total=%d minutes", total)
     return total if total > 0 else None
 
 
@@ -101,7 +110,10 @@ def parse_amount(text: str) -> Optional[float]:
     unit = match.group(2).lower()
 
     if unit == "oz":
-        return round(value * 29.5735, 2)
+        converted = round(value * 29.5735, 2)
+        logger.debug("parse_amount: %.2f oz -> %.2f ml", value, converted)
+        return converted
+    logger.debug("parse_amount: %.2f ml", value)
     return value
 
 
@@ -124,8 +136,11 @@ def parse_time_line(text: str, base_date: datetime) -> Optional[datetime]:
             hour = 0
 
     try:
-        return base_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        result = base_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        logger.debug("parse_time_line: parsed %r -> %s", text, result)
+        return result
     except:
+        logger.debug("parse_time_line: failed to build datetime from hour=%d minute=%d", hour, minute)
         return None
 
 
@@ -133,11 +148,19 @@ def parse_time_line(text: str, base_date: datetime) -> Optional[datetime]:
 # Main Parser
 # ---------------------------------
 
+BREAST_SIDES = [LEFT, RIGHT, EACH, BOTH] = ["left", "right", "each", "both"]
+
+DIAPER_EVENT_TYPES = [PEE, POO, BOTH] = ["pee", "poo", "both"]
+DIAPER_COLOR = [YELLOW, GREEN, BROWN, BLACK, RED] = ["yellow", "green", "brown", "black", "red"]
+DIAPER_AMOUNT = {"little": "little", "small": "little", "medium": "medium", "big": "big"}
+DIAPER_CONSISTENCY = [RUNNY, SOFT, SOLID, HARD] = ["runny", "soft", "solid", "hard"]
+BOTTLE_TYPES = {"formula": "Formula", "milk": "Breast Milk", "breastmilk": "Breast Milk"}
+
 def parse_message(text: str, telegram_datetime: datetime) -> Dict:
+    logger.debug("parse_message: input text=%r", text)
 
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     timestamp = None
-    events = []
     errors = []
 
     # --------- Time Detection ----------
@@ -148,12 +171,24 @@ def parse_message(text: str, telegram_datetime: datetime) -> Dict:
             break
 
     if not timestamp:
+        logger.debug("parse_message: no valid time found")
         errors.append("No valid time found.")
         return {"timestamp": None, "events": [], "errors": errors}
 
+    logger.debug("parse_message: timestamp=%s", timestamp)
+
     # --------- Event Parsing ----------
     # Note: Consider the timestamp line to also contain information about child's activity
+
+    # maintain lists of different types of events in case we need to combine multiple before logging
+    # e.g., 2 lines for breastfeeding at left and right should be combined into 1 event with duration for left and right breasts
+
+    breastfeeding_events = []
+    bottle_events = []
+    diaper_events = []
+
     for line in lines:
+        logger.debug("parse_message: parsing line=%r", line)
         # marker to indicate whether the line was processed
         line_processed = False
         lower = line.lower()
@@ -163,80 +198,64 @@ def parse_message(text: str, telegram_datetime: datetime) -> Dict:
             line_processed = True
 
         # Breastfeeding 
-        if fuzzy_contains(lower, ["left", "right", "each", "both"]) and DURATION_REGEX.search(text):
-            side = fuzzy_extract_keyword(lower, ["left", "right", "each", "both"])
+        if fuzzy_contains(lower, BREAST_SIDES) and DURATION_REGEX.search(text):
+            side = fuzzy_extract_keyword(lower, BREAST_SIDES)
             duration = parse_duration(lower)
             if duration:
-                events.append({
-                    "event_type": "breastfeed",
+                breastfeeding_events.append({
                     "side": side,
                     "duration_minutes": duration,
-                    "timestamp": timestamp
                 })
                 line_processed = True
             else:
                 errors.append(f"Side duration missing: {line}")
 
+        
+
         # Bottle feeding
-        if fuzzy_contains(lower, ["formula", "bottle", "fed", "milk", "breastmilk"]) and AMOUNT_REGEX.search(lower):
-            feed_type = fuzzy_extract_keyword(lower, ["formula", "bottle", "fed", "milk", "breastmilk"])
+        if fuzzy_contains(lower, list(BOTTLE_TYPES.keys())) and AMOUNT_REGEX.search(lower):
+            feed_type = fuzzy_extract_keyword(lower, list(BOTTLE_TYPES.keys()))
             amount = parse_amount(lower)
             if amount:
-                events.append({
-                    "event_type": "bottle_feed",
+                bottle_events.append({
                     "quantity_ml": amount,
-                    "timestamp": timestamp,
-                    "feed_type": feed_type
+                    "feed_type": BOTTLE_TYPES[feed_type] if feed_type else None,
                 })
                 line_processed = True
 
         # Diaper wet
         if fuzzy_contains(lower, ["pee", "wet", "urine"]):
-            size = fuzzy_extract_keyword(lower, ["small", "big"])
-            events.append({
-                "event_type": "diaper",
-                "diaper_type": "wet",
-                "size": size,
-                "timestamp": timestamp
+            size = fuzzy_extract_keyword(lower, list(DIAPER_AMOUNT.keys()))
+            diaper_events.append({
+                "diaper_type": PEE,
+                "size": DIAPER_AMOUNT[size] if size else None,
             })
             line_processed = True
 
         # Diaper poop
         if fuzzy_contains(lower, ["poop", "potty", "dirty"]):
-            size = fuzzy_extract_keyword(lower, ["small", "big"])
-            events.append({
-                "event_type": "diaper",
-                "diaper_type": "poop",
-                "size": size,
-                "timestamp": timestamp
+            size = fuzzy_extract_keyword(lower, list(DIAPER_AMOUNT.keys()))
+            diaper_events.append({
+                "diaper_type": POO,
+                "size": DIAPER_AMOUNT[size] if size else None,
             })
-            line_processed = True
-
-        # Sleep
-        if fuzzy_contains(lower, ["sleep", "slept", "nap"]):
-            duration = parse_duration(lower)
-            if duration:
-                events.append({
-                    "event_type": "sleep",
-                    "sleep_minutes": duration,
-                    "timestamp": timestamp
-                })
-            else:
-                errors.append(f"Sleep duration missing: {line}")
             line_processed = True
 
         if not line_processed:
             errors.append(f"Unrecognized line: {line}")
 
+    all_events = diaper_events + breastfeeding_events + bottle_events
+    logger.debug("parse_message: %d event(s), %d error(s)", len(all_events), len(errors))
     return {
         "timestamp": timestamp,
-        "events": events,
+        "events": all_events,
         "errors": errors
     }
 
 
 import sys
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(name)s %(levelname)s: %(message)s")
     message = sys.argv[1]
     actions = parse_message(message, datetime.now())
     print (actions["timestamp"])
