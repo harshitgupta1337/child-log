@@ -67,8 +67,8 @@ def upload_to_huckleberry(events) -> bool:
             elif isinstance(event, BreastFeedingEvent):
                 api.log_breast_feeding_at_time(
                     child_uid=child_uid,
-                    left_duration=event.left_duration_minutes,
-                    right_duration=event.right_duration_minutes,
+                    left_duration=event.left_duration_minutes*60,
+                    right_duration=event.right_duration_minutes*60,
                     time_ms=int(event.timestamp.timestamp() * 1000) if event.timestamp else None
                 )
             elif isinstance(event, BottleFeedingEvent):
