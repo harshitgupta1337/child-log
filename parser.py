@@ -286,9 +286,7 @@ def parse_message(text: str, telegram_datetime: datetime) -> Dict:
             break
 
     if not timestamp:
-        logger.debug("parse_message: no valid time found")
-        errors.append("No valid time found.")
-        return ([], errors)
+        timestamp = telegram_datetime
 
     logger.debug("parse_message: timestamp=%s", timestamp)
 

@@ -3,12 +3,14 @@ import requests
 from fastapi import FastAPI, Request
 from datetime import datetime, timedelta
 import asyncio
+from zoneinfo import ZoneInfo
 from parser import parse_message
 
 app = FastAPI()
 
 BOT_TOKEN = "8686910871:AAFP9rL4wQq4MFYFtp0yn_24BSJXPlnplsQ"
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+TIMEZONE="America/New_York"
 
 # -----------------------------
 # In-memory pending store
@@ -75,8 +77,12 @@ def send_confirmation(chat_id, text):
 def format_confirmation(events):
     # pretty-print each event
     text = "Please confirm the following events:\n\n"
+    timestamp_added = False
     for event in events:
         if event is not None:
+            if not timestamp_added:
+                text += "%s \n" % str(event.timestamp.astimezone(ZoneInfo(TIMEZONE)).strftime("%m-%d %H:%M"))
+                timestamp_added = True
             text += "%s\n" % str(event)
     text += "\nConfirm upload?"
     return text
