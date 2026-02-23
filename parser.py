@@ -168,7 +168,12 @@ class DiaperEvent:
         self.timestamp = timestamp
 
     def __str__(self):
-        return f"DiaperEvent(timestamp={self.timestamp}, type={self.diaper_type}, poo_size={self.poo_size}, pee_size={self.pee_size}, color={self.color}, consistency={self.consistency})"
+        if self.diaper_type == PEE:
+            return f"{self.pee_size} PEE"
+        elif self.diaper_type == POO:
+            return f"{self.poo_size} POO"
+        else:
+            return f"Mixed: {self.pee_size} PEE, {self.poo_size} POO"
 
 # Data structure for breastfeeding event
 class BreastFeedingEvent:
@@ -184,7 +189,7 @@ class BreastFeedingEvent:
 
     # function to pretty-print the breastfeeding event
     def __str__(self):
-        return f"BreastFeedingEvent(timestamp={self.timestamp}, left_duration={self.left_duration_minutes} min, right_duration={self.right_duration_minutes} min)"
+        return f"BreastFeed right={self.right_duration_minutes} min, left={self.left_duration_minutes} min"
 
 # Data structure for bottle feeding event
 class BottleFeedingEvent:
@@ -198,7 +203,7 @@ class BottleFeedingEvent:
         self.timestamp = timestamp
 
     def __str__(self):
-        return f"BottleFeedingEvent(timestamp={self.timestamp}, quantity={self.quantity_ml} ml, type={self.feed_type})"
+        return f"BottleFeed {self.quantity_ml} ml {self.feed_type})"
 
 # function to combine multiple bottle feeding lines into one event with total quantity and feed type
 # if there are multiple events with the same feed type, combine their quantities
@@ -245,7 +250,7 @@ def combine_diaper_events(events: List[Dict]) -> DiaperEvent:
         return None
     if len(events) == 1:
         e = events[0]
-        return DiaperEvent(diaper_type=e["diaper_type"], poo_size=e.get("poo_size"), pee_size=e.get("pee_size"), color=e.get("color"), consistency=e.get("consistency"), timestamp=None)
+        return DiaperEvent(diaper_type=e["diaper_type"], poo_size=e.get("size"), pee_size=e.get("size"), color=e.get("color"), consistency=e.get("consistency"), timestamp=None)
 
     # proceed if there are more than 1 events
     pee_event = next((e for e in events if e["diaper_type"] == PEE), None)
@@ -283,7 +288,7 @@ def parse_message(text: str, telegram_datetime: datetime) -> Dict:
     if not timestamp:
         logger.debug("parse_message: no valid time found")
         errors.append("No valid time found.")
-        return {"timestamp": None, "events": [], "errors": errors}
+        return ([], errors)
 
     logger.debug("parse_message: timestamp=%s", timestamp)
 
@@ -373,7 +378,7 @@ def parse_message(text: str, telegram_datetime: datetime) -> Dict:
     for event in all_events:
         logger.debug("combined event: %s", event)
 
-    return all_events
+    return all_events, errors
 
 import sys
 if __name__ == "__main__":

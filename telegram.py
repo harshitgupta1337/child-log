@@ -7,7 +7,7 @@ from parser import parse_message
 
 app = FastAPI()
 
-BOT_TOKEN = "YOUR_BOT_TOKEN"
+BOT_TOKEN = "8686910871:AAFP9rL4wQq4MFYFtp0yn_24BSJXPlnplsQ"
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 # -----------------------------
@@ -17,13 +17,16 @@ pending_confirmations = {}
 
 CONFIRM_TTL_MINUTES = 10
 
-
 # -----------------------------
-# Dummy DSL Parser (replace with yours)
+# DSL Parser
 # -----------------------------
 def parse_dsl(text: str):
-    parse_message(text, datetime.now())
-
+    print ("parsing text:", text)
+    events, errs = parse_message(text, datetime.now())
+    if len(errs) > 0:
+        print ("Errors:", errs)
+        return None
+    return events
 
 # -----------------------------
 # Dummy Huckleberry Adapter
@@ -69,19 +72,14 @@ def send_confirmation(chat_id, text):
 # -----------------------------
 # Format Confirmation Message
 # -----------------------------
-def format_confirmation(event):
-    text = f"🕒 Time: {event['time']}\n\n"
-    for e in event["events"]:
-        if e["type"] == "breastfeed":
-            text += (
-                "🍼 Breastfeed\n"
-                f"  - Total: {e.get('duration')} min\n"
-                f"  - Left: {e.get('left')} min\n"
-                f"  - Right: {e.get('right')} min\n\n"
-            )
-    text += "Confirm upload?"
+def format_confirmation(events):
+    # pretty-print each event
+    text = "Please confirm the following events:\n\n"
+    for event in events:
+        if event is not None:
+            text += "%s\n" % str(event)
+    text += "\nConfirm upload?"
     return text
-
 
 # -----------------------------
 # Webhook Endpoint
@@ -109,13 +107,22 @@ async def handle_message(message):
     user_id = message["from"]["id"]
     text = message.get("text", "")
 
-    parsed_event = parse_dsl(text)
+    parsed_events = parse_dsl(text)
+    print ("parsed_events:", parsed_events)
+    if parsed_events == None:
+        return {"ok": True}
 
-    if not parsed_event:
+    print ("chat_id:", chat_id)
+    print ("user_id:", user_id)
+    print ("text:", text)
+
+    send_message(chat_id, "🔍 Parsing your message...")
+
+    if not parsed_events:
         send_message(chat_id, "❌ Could not parse event.")
         return {"ok": True}
 
-    confirmation_text = format_confirmation(parsed_event)
+    confirmation_text = format_confirmation(parsed_events)
 
     response = send_confirmation(chat_id, confirmation_text)
 
@@ -124,8 +131,8 @@ async def handle_message(message):
     # Store pending event
     pending_confirmations[message_id] = {
         "user_id": user_id,
-        "parsed_event": parsed_event,
-        "timestamp": datetime.utcnow()
+        "parsed_events": parsed_events,
+        "timestamp": datetime.now()
     }
 
     return {"ok": True}
@@ -146,7 +153,7 @@ async def handle_callback(callback):
         return {"ok": True}
 
     if data == "confirm":
-        success = upload_to_huckleberry(pending["parsed_event"])
+        success = upload_to_huckleberry(pending["parsed_events"])
 
         if success:
             send_message(chat_id, "✅ Uploaded successfully.")
