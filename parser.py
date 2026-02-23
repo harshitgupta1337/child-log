@@ -121,7 +121,7 @@ def parse_time_line(text: str, base_date: datetime) -> Optional[datetime]:
     lower = text.lower().replace("time", "").strip()
 
     match = CLOCK_REGEX.search(lower)
-    if not match:
+    if not match or AMOUNT_REGEX.search(lower) or DURATION_REGEX.search(lower):
         return None
 
     hour = int(match.group(1))
