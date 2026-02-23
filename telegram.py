@@ -4,13 +4,26 @@ from fastapi import FastAPI, Request
 from datetime import datetime, timedelta
 import asyncio
 from zoneinfo import ZoneInfo
-from parser import parse_message
+from huckleberry_api import HuckleberryAPI
+from parser import parse_message, DiaperEvent, BreastFeedingEvent, BottleFeedingEvent
 
 app = FastAPI()
 
 BOT_TOKEN = "8686910871:AAFP9rL4wQq4MFYFtp0yn_24BSJXPlnplsQ"
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 TIMEZONE="America/New_York"
+
+# Initialize API client
+api = HuckleberryAPI(
+    email="harshitgupta1337@gmail.com",
+    password="Pritha@BWH2026",
+    timezone=TIMEZONE,
+)
+
+children = api.get_children()
+child = children[1]
+print (child)
+child_uid = child["uid"]
 
 # -----------------------------
 # In-memory pending store
@@ -24,7 +37,7 @@ CONFIRM_TTL_MINUTES = 10
 # -----------------------------
 def parse_dsl(text: str):
     print ("parsing text:", text)
-    events, errs = parse_message(text, datetime.now())
+    events, errs = parse_message(text, datetime.now(ZoneInfo(TIMEZONE)))
     if len(errs) > 0:
         print ("Errors:", errs)
         return None
@@ -33,9 +46,41 @@ def parse_dsl(text: str):
 # -----------------------------
 # Dummy Huckleberry Adapter
 # -----------------------------
-def upload_to_huckleberry(event):
+def upload_to_huckleberry(events) -> bool:
     # Replace with real API call
-    print("Uploading:", event)
+    print("Uploading:", events)
+    for event in events:
+        if event is None:
+            continue
+        try:
+            # check the type of event and call the appropriate API method
+            if isinstance(event, DiaperEvent):
+                api.log_diaper_at_time(
+                    child_uid=child_uid,
+                    mode=event.diaper_type,
+                    poo_amount=event.poo_size,
+                    pee_amount=event.pee_size,
+                    color=event.color,
+                    consistency=event.consistency,
+                    time_ms=int(event.timestamp.timestamp() * 1000) if event.timestamp else None
+                )
+            elif isinstance(event, BreastFeedingEvent):
+                api.log_breast_feeding_at_time(
+                    child_uid=child_uid,
+                    left_duration=event.left_duration_minutes,
+                    right_duration=event.right_duration_minutes,
+                    time_ms=int(event.timestamp.timestamp() * 1000) if event.timestamp else None
+                )
+            elif isinstance(event, BottleFeedingEvent):
+                api.log_bottle_feeding_at_time(
+                    child_uid=child_uid,
+                    amount=event.quantity_ml,
+                    bottle_type=event.feed_type,
+                    time_ms=int(event.timestamp.timestamp() * 1000) if event.timestamp else None
+                )
+        except Exception as e:
+            print ("Error uploading event:", e)
+            return False
     return True
 
 
@@ -76,7 +121,7 @@ def send_confirmation(chat_id, text):
 # -----------------------------
 def format_confirmation(events):
     # pretty-print each event
-    text = "Please confirm the following events:\n\n"
+    text = f"Please confirm the following events for child {child['name']}:\n\n"
     timestamp_added = False
     for event in events:
         if event is not None:

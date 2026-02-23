@@ -370,6 +370,7 @@ def parse_message(text: str, telegram_datetime: datetime) -> Dict:
     combined_bottle_feeding_events = combine_bottle_feeding_events(bottle_events)
     for event in combined_bottle_feeding_events:
         event.timestamp = timestamp
+        print (event, timestamp)
 
     all_events = [combined_breastfeeding_event] + [combined_diaper_event] + combined_bottle_feeding_events
 
