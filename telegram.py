@@ -225,7 +225,7 @@ async def handle_callback(callback):
 # -----------------------------
 async def cleanup_expired():
     while True:
-        now = datetime.utcnow()
+        now = datetime.now()
         expired = []
 
         for msg_id, data in pending_confirmations.items():
