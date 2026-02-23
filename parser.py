@@ -143,18 +143,128 @@ def parse_time_line(text: str, base_date: datetime) -> Optional[datetime]:
         logger.debug("parse_time_line: failed to build datetime from hour=%d minute=%d", hour, minute)
         return None
 
-
-# ---------------------------------
-# Main Parser
-# ---------------------------------
-
 BREAST_SIDES = [LEFT, RIGHT, EACH, BOTH] = ["left", "right", "each", "both"]
 
 DIAPER_EVENT_TYPES = [PEE, POO, BOTH] = ["pee", "poo", "both"]
 DIAPER_COLOR = [YELLOW, GREEN, BROWN, BLACK, RED] = ["yellow", "green", "brown", "black", "red"]
-DIAPER_AMOUNT = {"little": "little", "small": "little", "medium": "medium", "big": "big"}
+DIAPER_AMOUNT = {"little": "little", "small": "little", "medium": "medium", "big": "big", "large": "big"}
 DIAPER_CONSISTENCY = [RUNNY, SOFT, SOLID, HARD] = ["runny", "soft", "solid", "hard"]
 BOTTLE_TYPES = {"formula": "Formula", "milk": "Breast Milk", "breastmilk": "Breast Milk"}
+
+class DiaperEvent:
+    diaper_type: str  # pee, poo, both
+    poo_size: Optional[str]  # little, medium, big
+    pee_size: Optional[str]  # little, medium, big
+    color: Optional[str]  # yellow, green, brown, black, red
+    consistency: Optional[str]  # runny, soft, solid, hard
+    timestamp: datetime
+
+    def __init__(self, diaper_type: str, poo_size: Optional[str], pee_size: Optional[str], color: Optional[str], consistency: Optional[str], timestamp: datetime):
+        self.diaper_type = diaper_type
+        self.poo_size = poo_size
+        self.pee_size = pee_size
+        self.color = color
+        self.consistency = consistency
+        self.timestamp = timestamp
+
+    def __str__(self):
+        return f"DiaperEvent(timestamp={self.timestamp}, type={self.diaper_type}, poo_size={self.poo_size}, pee_size={self.pee_size}, color={self.color}, consistency={self.consistency})"
+
+# Data structure for breastfeeding event
+class BreastFeedingEvent:
+    right_duration_minutes: int
+    left_duration_minutes: int
+    timestamp: datetime
+
+    # constructor to initialize the breastfeeding event with durations for both sides and timestamp
+    def __init__(self, right_duration_minutes: int, left_duration_minutes: int, timestamp: datetime):
+        self.right_duration_minutes = right_duration_minutes
+        self.left_duration_minutes = left_duration_minutes
+        self.timestamp = timestamp
+
+    # function to pretty-print the breastfeeding event
+    def __str__(self):
+        return f"BreastFeedingEvent(timestamp={self.timestamp}, left_duration={self.left_duration_minutes} min, right_duration={self.right_duration_minutes} min)"
+
+# Data structure for bottle feeding event
+class BottleFeedingEvent:
+    quantity_ml: float
+    feed_type: str  # formula, breast milk, etc.
+    timestamp: datetime
+
+    def __init__(self, quantity_ml: float, feed_type: str, timestamp: datetime):
+        self.quantity_ml = quantity_ml
+        self.feed_type = feed_type
+        self.timestamp = timestamp
+
+    def __str__(self):
+        return f"BottleFeedingEvent(timestamp={self.timestamp}, quantity={self.quantity_ml} ml, type={self.feed_type})"
+
+# function to combine multiple bottle feeding lines into one event with total quantity and feed type
+# if there are multiple events with the same feed type, combine their quantities
+# if there are events with different feed types, we will create separate events for each feed type
+def combine_bottle_feeding_events(events: List[Dict]) -> List[BottleFeedingEvent]:
+    combined = {}
+    for event in events:
+        feed_type = event["feed_type"]
+        quantity = event["quantity_ml"]
+        if feed_type in combined:
+            combined[feed_type] += quantity
+        else:
+            combined[feed_type] = quantity
+
+    return [BottleFeedingEvent(quantity_ml=qty, feed_type=ftype, timestamp=None) for ftype, qty in combined.items()]
+
+# function for combining multiple breastfeeding lines into one event with duration for left and right breasts
+# breastfeeding side EACH means that the duration needs to be added to both right and left sides, while BOTH means that the duration is the total for both sides (e.g., 20 minutes each breast would be "each 20 minutes" or "both 40 minutes")
+def combine_breastfeeding_events(events: List[Dict]) -> BreastFeedingEvent:
+    if len(events) == 0:
+        return None
+    
+    left_duration = 0
+    right_duration = 0
+
+    for event in events:
+        if event["side"] == LEFT:
+            left_duration += event["duration_minutes"]
+        elif event["side"] == RIGHT:
+            right_duration += event["duration_minutes"]
+        elif event["side"] == EACH:
+            left_duration += event["duration_minutes"]
+            right_duration += event["duration_minutes"]
+        elif event["side"] == BOTH:
+            left_duration += event["duration_minutes"] / 2
+            right_duration += event["duration_minutes"] / 2
+
+    return BreastFeedingEvent(right_duration_minutes=right_duration, left_duration_minutes=left_duration, timestamp=None)
+
+# function for combining multiple diaper lines into one event with type, size, color, consistency
+# only combine if there are 2 events in the input list, one for pee and another for poop
+def combine_diaper_events(events: List[Dict]) -> DiaperEvent:
+    if len(events) == 0:
+        return None
+    if len(events) == 1:
+        e = events[0]
+        return DiaperEvent(diaper_type=e["diaper_type"], poo_size=e.get("poo_size"), pee_size=e.get("pee_size"), color=e.get("color"), consistency=e.get("consistency"), timestamp=None)
+
+    # proceed if there are more than 1 events
+    pee_event = next((e for e in events if e["diaper_type"] == PEE), None)
+    poo_event = next((e for e in events if e["diaper_type"] == POO), None)
+
+    if not pee_event or not poo_event:
+        raise ValueError("Both pee and poo events are required to combine")
+
+    # For simplicity, we will take the size, color, consistency from the poo event if available, otherwise from the pee event
+    poo_size = poo_event.get("size")
+    pee_size = pee_event.get("size")
+    color = poo_event.get("color")
+    consistency = poo_event.get("consistency")
+
+    return DiaperEvent(diaper_type=BOTH, poo_size=poo_size, pee_size=pee_size, color=color, consistency=consistency, timestamp=None)
+
+# ---------------------------------
+# Main Parser
+# ---------------------------------
 
 def parse_message(text: str, telegram_datetime: datetime) -> Dict:
     logger.debug("parse_message: input text=%r", text)
@@ -210,8 +320,6 @@ def parse_message(text: str, telegram_datetime: datetime) -> Dict:
             else:
                 errors.append(f"Side duration missing: {line}")
 
-        
-
         # Bottle feeding
         if fuzzy_contains(lower, list(BOTTLE_TYPES.keys())) and AMOUNT_REGEX.search(lower):
             feed_type = fuzzy_extract_keyword(lower, list(BOTTLE_TYPES.keys()))
@@ -230,6 +338,7 @@ def parse_message(text: str, telegram_datetime: datetime) -> Dict:
                 "diaper_type": PEE,
                 "size": DIAPER_AMOUNT[size] if size else None,
             })
+            print (diaper_events)
             line_processed = True
 
         # Diaper poop
@@ -244,21 +353,31 @@ def parse_message(text: str, telegram_datetime: datetime) -> Dict:
         if not line_processed:
             errors.append(f"Unrecognized line: {line}")
 
-    all_events = diaper_events + breastfeeding_events + bottle_events
-    logger.debug("parse_message: %d event(s), %d error(s)", len(all_events), len(errors))
-    return {
-        "timestamp": timestamp,
-        "events": all_events,
-        "errors": errors
-    }
+    # Combine breastfeeding events
+    combined_breastfeeding_event = combine_breastfeeding_events(breastfeeding_events)
+    if combined_breastfeeding_event:
+        combined_breastfeeding_event.timestamp = timestamp
 
+    # Combine diaper events
+    combined_diaper_event = combine_diaper_events(diaper_events)
+    if combined_diaper_event:
+        combined_diaper_event.timestamp = timestamp
+
+    # Combine bottle feeding events
+    combined_bottle_feeding_events = combine_bottle_feeding_events(bottle_events)
+    for event in combined_bottle_feeding_events:
+        event.timestamp = timestamp
+
+    all_events = [combined_breastfeeding_event] + [combined_diaper_event] + combined_bottle_feeding_events
+
+    for event in all_events:
+        logger.debug("combined event: %s", event)
+
+    return all_events
 
 import sys
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(name)s %(levelname)s: %(message)s")
+    logging.basicConfig(level=logging.DEBUG, format="%(name)s %(levelname)s: %(message)s")
     message = sys.argv[1]
-    actions = parse_message(message, datetime.now())
-    print (actions["timestamp"])
-    for event in actions["events"]:
-      print (event)
-    print (actions["errors"])
+    events = parse_message(message, datetime.now())
+    print (events)
