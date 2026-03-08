@@ -16,7 +16,7 @@ def get_envvar(var: str) -> str:
     except KeyError:
         raise(f"Error: {var} environment variable not set.")
 
-BOT_TOKEN = get_envvar("BOT_TOKEN")
+BOT_TOKEN = get_envvar("TELEGRAM_BOT_TOKEN")
 HUCKLEBERRY_EMAIL = get_envvar("HUCKLEBERRY_EMAIL")
 HUCKLEBERRY_PASSWORD = get_envvar("HUCKLEBERRY_PASSWORD")
 TIMEZONE = os.getenv("TIMEZONE", "America/New_York")
