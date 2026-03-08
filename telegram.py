@@ -9,19 +9,30 @@ from parser import parse_message, DiaperEvent, BreastFeedingEvent, BottleFeeding
 
 app = FastAPI()
 
-BOT_TOKEN = "8686910871:AAFP9rL4wQq4MFYFtp0yn_24BSJXPlnplsQ"
+def get_envvar(var: str) -> str:
+    try:
+        val = os.environ[var]
+        print(f"{var} variable: {val}")
+    except KeyError:
+        raise(f"Error: {var} environment variable not set.")
+
+BOT_TOKEN = get_envvar("BOT_TOKEN")
+HUCKLEBERRY_EMAIL = get_envvar("HUCKLEBERRY_EMAIL")
+HUCKLEBERRY_PASSWORD = get_envvar("HUCKLEBERRY_PASSWORD")
+TIMEZONE = os.getenv("TIMEZONE", "America/New_York")
+CHILD_ID = os.getenv("CHILD_ID", "1")
+
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
-TIMEZONE="America/New_York"
 
 # Initialize API client
 api = HuckleberryAPI(
-    email="harshitgupta1337@gmail.com",
-    password="Pritha@BWH2026",
+    email=HUCKLEBERRY_EMAIL,
+    password=HUCKLEBERRY_PASSWORD,
     timezone=TIMEZONE,
 )
 
 children = api.get_children()
-child = children[1]
+child = children[int(CHILD_ID)]
 print (child)
 child_uid = child["uid"]
 
