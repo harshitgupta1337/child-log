@@ -1,0 +1,3 @@
+[submodule "py-huckleberry-api"]
+	url = https://github.com/harshitgupta1337/py-huckleberry-api.git
+	path = py-huckleberry-api
